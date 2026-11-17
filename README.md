@@ -15,14 +15,19 @@ end of the day's first hour.
 `/input/<id>.in` and writes `/output/<id>.out` with five quantiles
 (5%, 25%, 50%, 75%, 95%) of the viewer count for each of hours 2–24.
 
-The forecast is a **launch-shape library**: every comparable past launch in
-the case contributes its release-day hourly curve, normalised by its own
-hour-1 print. For each hour we fit a weighted regression of
-log(viewers_h / viewers_1) on log(viewers_1) across the rolling-midnight
-launches, and predict the target launch at its own hour-1 print. The spread
-is the regression's residual scale with a prediction-interval widening, and
-the quantiles are skew-adjusted (wider upper tail: launch days surprise to
-the upside far more often than to the downside).
+The forecast is a **launch-shape library, history-anchored**: every
+comparable past launch in the case contributes its release-day hourly curve,
+normalised by its own hour-1 print. For each hour we fit a weighted
+regression of log(viewers_h / viewers_1) on log(viewers_1) across the
+rolling-midnight launches, and predict the target launch at its own hour-1
+print. From hour 6 (the US East unlock) a second predictor joins the
+regression: r_m1, the log of the viewers in the hour before the release day
+relative to the hour-1 print — the pre-launch ramp, which measures how much
+of the world is already watching the early-region streams and predicts the
+late-day US surge beyond what hour 1 alone says. The spread is the
+regression's residual scale with a prediction-interval widening, and the
+quantiles are skew-adjusted (wider upper tail: launch days surprise to the
+upside far more often than to the downside).
 
 Only launches shaped by a rolling midnight-local unlock like GTA VI's count;
 simultaneous global unlocks, early-access-contaminated launches, free-to-play
@@ -30,18 +35,22 @@ and slow-burn launches, and the target game's own pre-release history are
 excluded. Weights favour console-only launches (x8: GTA VI is console-only) and
 older launches (2.5x per year back: the 2020 Sony console launches are the
 closest analogues for a Rockstar midnight rolling launch). The median is
-shifted up by an amount growing with the hour (the late-day surge, when the
-US wakes up, is systematically underpredicted by the shape library), and the
-regression is never evaluated past ln(viewers_1) = 12.6 — GTA VI's hour-1
-print will exceed every validated launch, and a linear slope extrapolated
-past the data would predict a declining day, which cannot happen for a
-rolling-midnight launch. The median is not smoothed over neighbouring hours
+shifted up by an amount growing with the hour (0.125 log at h24: the late-day
+surge, when the US wakes up, is systematically underpredicted by the shape
+library), and the regression is never evaluated past ln(viewers_1) = 12.6 —
+GTA VI's hour-1 print will exceed every validated launch, and a linear slope
+extrapolated past the data would predict a declining day, which cannot happen
+for a rolling-midnight launch. The median is not smoothed over neighbouring hours
 (iteration 3: smoothing blurred the sharp h5 jump and h12 crater the truth
-actually has), and the upper tail is not widened (upper scale 1.0).
+actually has), and the upper tail is not widened (upper scale 1.0). If the
+pre-launch hour is missing from a case, the model falls back to the pure
+hour-1 design for every hour.
 
-Local validation on the four practice cases: mean pinball loss **0.143**
-(house baseline: 0.387; v2 entry: 0.156; v1 entry: 0.180). Leave-one-practice-
-out: 0.162. Deterministic, offline, runs in under a second per case.
+Local validation on the four practice cases: mean pinball loss **0.137**
+(house baseline: 0.387; v3 entry: 0.143; v2 entry: 0.156; v1 entry: 0.180).
+Leave-one-comparable-out: 0.209 (v3: 0.236). Leave-one-practice-out
+rest-means beat v3 on all four 3-case subsets. Deterministic, offline, runs
+in under a second per case.
 
 ## Run it
 
