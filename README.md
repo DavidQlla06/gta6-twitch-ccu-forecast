@@ -46,29 +46,31 @@ actually has), and the upper tail is not widened (upper scale 1.0). If the
 pre-launch hour is missing from a case, the model falls back to the pure
 hour-1 design for every hour.
 
-Iteration 5 — a poker bet for the single final day, not more practice tuning:
-the fitted r_m1 coefficient is scaled up by a base factor of 1.375, plus a
-boost of +2.0 per unit of r_m1 above 0.3 (Wolverine-hot), so a hot pre-launch
-ramp moves the late-day median much further than the linear fit says, while a
-cool anchor (r_m1 <= 0.3) is barely touched. The boost's contribution is
-capped at 0.20 log per hour, so the bet stays bounded even if the final
-anchor lands far outside the observed range (max r_m1 = 0.58). The scale is
-convex in the anchor by design: a ramp that hot signals a qualitatively more
-explosive US wave than linear extrapolation suggests. The honest limit: if the
-anchor lies (hot ramp, flat day), this model overshoots more than v4 — that is
-the bet being taken, and the cap is what bounds it. A fuller poker (base 1.5,
-boost 4, shift 0.175, upper 1.1, cap 0.25) lives on the `poker` branch.
+Iteration 5 — FULL POKER for the single final day (this is the `poker`
+branch; the defensible middle — base 1.375, boost 2, cap 0.20 — lives on
+`main`): the fitted r_m1 coefficient is scaled up by a base factor of 1.5,
+plus a boost of +4.0 per unit of r_m1 above 0.3 (Wolverine-hot), so a hot
+pre-launch ramp moves the late-day median much further than the linear fit
+says, while a cool anchor (r_m1 <= 0.3) is barely touched. The boost's
+contribution is capped at 0.25 log per hour, so the bet stays bounded even
+if the final anchor lands far outside the observed range (max r_m1 = 0.58).
+On top of the anchor bet, the median shift grows faster (0.175 log at h24)
+and the upper tail is widened (upper scale 1.1). The scale is convex in the
+anchor by design: a ramp that hot signals a qualitatively more explosive US
+wave than linear extrapolation suggests. The honest limit: this costs
+practice (0.1473 vs v4's 0.1367) and if the anchor lies (hot ramp, flat
+day) it overshoots more than v4 — that is the bet being taken, and the cap
+is what bounds it.
 
-Local validation on the four practice cases: mean pinball loss **0.134**
-(house baseline: 0.387; v4: 0.137; v3 entry: 0.143; v2 entry: 0.156; v1 entry:
-0.180). Leave-one-comparable-out: 0.217 (v4: 0.209 — the anchor scaling costs
-a little on the comparables, whose anchors are mostly cool; the trade is for
-the final day, where the anchor is the only real-time explosiveness signal).
-Leave-one-practice-out rest-means beat v4 on 3 of 4 subsets. Final-day
-scenarios (synthetic days built from practice shapes): an explosive 400k day
-0.212 (v4: 0.332), a strong 400k day 0.215 (v4: 0.232), a flat 1M day 0.103
-(v4: 0.102), a crater 1M day 0.155 (v4: 0.158). Deterministic, offline, runs
-in under a second per case.
+Local validation on the four practice cases: mean pinball loss **0.147**
+(house baseline: 0.387; v4: 0.137; v5-ship on `main`: 0.134; v3 entry:
+0.143; v2 entry: 0.156; v1 entry: 0.180). Leave-one-comparable-out: 0.231
+(v4: 0.209). Leave-one-practice-out rest-means beat v4 on 0 of 4 subsets —
+this branch is a pure final-day gamble, not a practice improvement.
+Final-day scenarios (synthetic days built from practice shapes): an
+explosive 400k day 0.150 (v4: 0.332), a strong 400k day 0.194 (v4: 0.232),
+a flat 1M day 0.113 (v4: 0.102), a crater 1M day 0.152 (v4: 0.158).
+Deterministic, offline, runs in under a second per case.
 
 ## Run it
 
