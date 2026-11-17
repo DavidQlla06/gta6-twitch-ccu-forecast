@@ -24,8 +24,10 @@ signature). Weights favour console-only launches (x2: GTA VI is console-only)
 and older launches (1.3x per year back: the 2018-2020 Sony/Rockstar console
 launches are the closest analogues for a Rockstar midnight rolling launch);
 all three choices were validated on the four practice cases, leave-one-out
-over the comparables, and leave-one-practice-out (practice loss ~0.19 vs the
-house baseline's ~0.39).
+over the comparables, and leave-one-practice-out (practice loss ~0.18 vs the
+house baseline's ~0.39). The per-hour spread is additionally shrunk 85%
+toward the day's median spread, because each hour's residual scale comes
+from only ~12 launches and is noisy (practice loss 0.1828 -> 0.1797).
 
 Standard library only. Deterministic: inputs are processed in sorted order,
 no randomness, no network, no clock. Runs in well under a second per case.
@@ -55,6 +57,14 @@ MIN_POINTS = 5     # minimum training launches for a per-hour regression
 TIME_WEIGHT = 1.3  # per-year vintage weight, favouring older launches
 CONSOLE_WEIGHT = 2.0
 SMOOTH_WIN = 1     # smoothing window over neighbouring hours
+SPREAD_SHRINK = 0.85  # fraction each hour's spread moves toward the median
+# Spread shrinkage: each hour's residual scale is estimated from only ~12
+# launches, so it is noisy. Shrink it 85% toward the day's median scale
+# (keeps a trace of genuine hour-to-hour structure). Validated on the four
+# practice cases: mean pinball loss 0.1828 -> 0.1797 (p00 0.270 -> 0.258,
+# p03 0.187 -> 0.186, p01/p02 essentially unchanged); stronger shrinkage
+# keeps helping up to a fully flat spread, but that discards the real
+# widening of uncertainty over the day, so 85% is the stopping point.
 
 
 def round2(x):
@@ -201,6 +211,9 @@ def forecast_case(case):
         spr[h] = max(0.05, s)
     med = smooth(med)
     spr = smooth(spr)
+    median_spr = sorted(spr.values())[len(spr) // 2]
+    spr = {h: (1.0 - SPREAD_SHRINK) * s + SPREAD_SHRINK * median_spr
+           for h, s in spr.items()}
 
     hours = []
     for h in range(2, 25):
