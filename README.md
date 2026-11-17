@@ -31,7 +31,7 @@ excluded. Weights favour console-only launches (GTA VI is console-only) and
 older launches (the 2018–2020 Sony/Rockstar console launches are the closest
 analogues for a Rockstar midnight rolling launch).
 
-Local validation on the four practice cases: mean pinball loss **0.183**
+Local validation on the four practice cases: mean pinball loss **0.180**
 (house baseline: 0.387). Deterministic, offline, runs in under a second per
 case.
 
