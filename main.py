@@ -29,6 +29,24 @@ house baseline's ~0.39). The per-hour spread is additionally shrunk 85%
 toward the day's median spread, because each hour's residual scale comes
 from only ~12 launches and is noisy (practice loss 0.1828 -> 0.1797).
 
+Iteration 2 (practice loss 0.1797 -> 0.1556; leave-one-practice-out 0.1797
+-> 0.1667): the v1 median was systematically too low — the truth sits above
+the forecast median at almost every hour for the two most GTA-like practice
+cases (Wolverine, RDR2), worst late in the day when the US wakes up — so the
+median is shifted up by an amount growing linearly with the hour (0 at h2,
++0.15 log at h24), and the upper tail is narrowed (1.4 -> 1.15) to compensate
+for the shift. The vintage weight is steepened (1.3 -> 2.0 per year back:
+the 2020 console launches are the closest analogues, and a steeper weight
+is the one knob whose improvement survives leave-one-practice-out).
+Finally, the regression is evaluated at min(ln(v1), 12.6): GTA VI's hour-1
+print will exceed every validated launch (largest practice v1 is GoW
+Ragnarok, ln 12.50), and a linear slope extrapolated past the data predicts
+a declining day (median below hour 1) for a rolling-midnight launch, which
+cannot happen — hour 1 is 00:00 UTC, before the US has even unlocked. Past
+12.6 the forecast takes the shape of the biggest validated launch instead.
+The spread's prediction-interval term still uses the true ln(v1), so a
+bigger hour-1 print still widens the intervals.
+
 Standard library only. Deterministic: inputs are processed in sorted order,
 no randomness, no network, no clock. Runs in well under a second per case.
 """
@@ -49,12 +67,14 @@ LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.6448536269514722, -0.6744897501960817, 0.0, 0.6744897501960817,
      1.6448536269514722]
 # Skew: widen the upper tail (growth surprises), narrow the lower tail.
-UPPER_SCALE = 1.4
+UPPER_SCALE = 1.15
 LOWER_SCALE = 0.75
+MED_SHIFT_GROW = 0.15  # median shift (log units) at h24, growing linearly from 0 at h2
+LX_CAP = 12.6  # do not extrapolate the ln(v1) slope past the biggest validated launch
 SIGMA_BASE = 0.15  # fallback spread / house-baseline spread
 PEAK_MAX = 4.0     # exclude launches whose peak exceeds 4x their hour-1 print
 MIN_POINTS = 5     # minimum training launches for a per-hour regression
-TIME_WEIGHT = 1.3  # per-year vintage weight, favouring older launches
+TIME_WEIGHT = 2.0  # per-year vintage weight, favouring older launches
 CONSOLE_WEIGHT = 2.0
 SMOOTH_WIN = 1     # smoothing window over neighbouring hours
 SPREAD_SHRINK = 0.85  # fraction each hour's spread moves toward the median
@@ -187,6 +207,9 @@ def forecast_case(case):
         return {"hours": [{"hour": h, "q": [1, 1, 1, 1, 1]} for h in range(2, 25)]}
     p1 = max(1.0, float(first["viewers"]))
     lx = math.log(p1)
+    # Cap the regression's evaluation point: past the biggest validated
+    # launch the slope is extrapolation, not evidence (see module docstring).
+    lx_pred = min(lx, LX_CAP)
     rows = build_rows(case)
     if len(rows) < MIN_POINTS:
         return {"hours": [{"hour": h, "q": baseline_quantiles(p1, h)}
@@ -201,7 +224,7 @@ def forecast_case(case):
             spr[h] = 0.30
             continue
         a, b, mx, sxx, _sw = wols(pts)
-        med[h] = a + b * lx
+        med[h] = a + b * lx_pred
         res = [p[1] - (a + b * p[0]) for p in pts]
         dof = max(1, len(pts) - 2)
         s = math.sqrt(sum(r * r for r in res) / dof)
@@ -217,10 +240,13 @@ def forecast_case(case):
 
     hours = []
     for h in range(2, 25):
+        # Median shift, growing with the hour: the late-day surge (US waking
+        # up) is systematically underpredicted by the shape library.
+        shift = MED_SHIFT_GROW * (h - 1) / 23.0
         qs = []
         for z in Z:
             scale = UPPER_SCALE if z > 0 else (LOWER_SCALE if z < 0 else 1.0)
-            qs.append(p1 * math.exp(med[h] + spr[h] * scale * z))
+            qs.append(p1 * math.exp(med[h] + shift + spr[h] * scale * z))
         # Enforce non-decreasing, finite, within (0, 1e9].
         qs = [min(max(q, 1e-6), 1e9) for q in qs]
         for i in range(1, 5):
