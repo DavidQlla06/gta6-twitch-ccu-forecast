@@ -1,17 +1,17 @@
 """Forecast GTA VI's launch-day Twitch viewers hour by hour (make.fun
 gta6-twitch-ccu-forecast-01).
 
-Method: a launch-shape library. Every comparable past launch in the case
-file contributes its release-day hourly curve, normalised by its own hour-1
-print. For each forecast hour h = 2..24 we fit a weighted least-squares
-regression of log(viewers_h / viewers_1) on log(viewers_1) across the
-rolling-midnight-unlock launches, and forecast the target launch's log-ratio
-at its own hour-1 print. The spread is the regression's residual scale with
-a prediction-interval widening (wider when the target's hour-1 print is far
-from the training centre, i.e. when we extrapolate), smoothed over neighbouring
-hours. Quantiles are the median with a skew: the upper tail is widened (launch
-days surprise to the upside far more often than to the downside) and the lower
-tail narrowed.
+Method: a launch-shape library, history-anchored. Every comparable past
+launch in the case file contributes its release-day hourly curve,
+normalised by its own hour-1 print. For each forecast hour h = 2..24 we fit
+a weighted least-squares regression of log(viewers_h / viewers_1) on
+log(viewers_1) across the rolling-midnight-unlock launches, and forecast
+the target launch's log-ratio at its own hour-1 print. The spread is the
+regression's residual scale with a prediction-interval widening (wider when
+the target's hour-1 print is far from the training centre, i.e. when we
+extrapolate), smoothed over neighbouring hours. Quantiles are the median
+with a skew: the upper tail is widened (launch days surprise to the upside
+far more often than to the downside) and the lower tail narrowed.
 
 Which comparables count: only launches whose release-day shape is driven by a
 rolling midnight-local unlock like GTA VI's (consoles unlock at midnight local
@@ -67,6 +67,38 @@ practice-specific tuning that will not transfer to the final case, or a
 structurally different model. This submission takes the defensible gain
 and does not chase them.
 
+Iteration 4 (practice loss 0.1433 -> 0.1367; leave-one-comparable-out
+0.2364 -> 0.2092; leave-one-practice-out rest-means beat v3 on all four
+3-case subsets): a NEW ANCHOR, not more tuning. The v1-v3 models use only
+the hour-1 print; they ignore everything recorded before it. But the case
+file carries the whole pre-launch ramp, and it is not dust: in the hour
+before day_start (23:00-00:00 UTC, the hour central Europe unlocks) the
+category already runs at 1.15x-1.8x the hour-1 print, and that ratio —
+r_m1 = ln(viewers in the hour before day_start / hour-1 print) — predicts
+the late-day surge beyond ln(v1). Mechanism: hour 1 is a trough (UK just
+unlocked at midnight, the US still asleep), while the pre-day hour measures
+how much of the world is still watching the early-region streams right
+before the day starts; a game the world is already watching that hard has
+a bigger US wave waiting behind the unlock. Evidence: r_m1 is the only
+pre-launch feature that improves BOTH the practice loss and the
+leave-one-comparable-out loss (r_m6, r_prepeak, channel ratios, ramp slopes
+and the pre-day mean all fail one or both); it helps broadly from h9
+onward, most at the crater hours and the late day. It is used only from h6
+(the US East unlock, 05:00 UTC): before that the trough hours are driven by
+APAC/UK decay and the feature adds noise. The median shift is reduced
+(0.15 -> 0.125) because r_m1 now explains part of the explosiveness the
+shift was compensating for. If the pre-day hour is missing from a case, the
+model falls back to the pure v3 design for every hour — never substitute 0
+for a missing feature (that scored 0.2395 on Wolverine in testing, far
+worse than v3's 0.1434). Honest limits: Wolverine, the most explosive
+practice case, still gets slightly worse than v3 (0.1476 vs 0.1434) — the
+library still underpredicts the most explosive launches late in the day
+(late-day median bias +0.35 log for Wolverine); a pooled parametric
+structural model (one joint fit across hours with unlock-step basis
+functions) was tested and rejected (practice 0.1537 — pooling across
+hours loses the sharp per-hour features). The 0.095 honest ceiling from
+iteration 3 stands; this submission banks the defensible 0.1367.
+
 Standard library only. Deterministic: inputs are processed in sorted order,
 no randomness, no network, no clock. Runs in well under a second per case.
 """
@@ -75,7 +107,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -89,7 +121,7 @@ Z = [-1.6448536269514722, -0.6744897501960817, 0.0, 0.6744897501960817,
 # Skew: widen the upper tail (growth surprises), narrow the lower tail.
 UPPER_SCALE = 1.0
 LOWER_SCALE = 0.75
-MED_SHIFT_GROW = 0.15  # median shift (log units) at h24, growing linearly from 0 at h2
+MED_SHIFT_GROW = 0.125  # median shift (log units) at h24, growing linearly from 0 at h2
 LX_CAP = 12.6  # do not extrapolate the ln(v1) slope past the biggest validated launch
 SIGMA_BASE = 0.15  # fallback spread / house-baseline spread
 PEAK_MAX = 4.0     # exclude launches whose peak exceeds 4x their hour-1 print
@@ -105,6 +137,14 @@ SPREAD_SHRINK = 0.85  # fraction each hour's spread moves toward the median
 # p03 0.187 -> 0.186, p01/p02 essentially unchanged); stronger shrinkage
 # keeps helping up to a fully flat spread, but that discards the real
 # widening of uncertainty over the day, so 85% is the stopping point.
+MIN_HOUR_RM1 = 6  # first hour the pre-launch anchor r_m1 enters the design
+# (the US East unlock, 05:00 UTC: before it the trough hours are driven by
+# APAC/UK decay and the feature adds noise; from h6 it predicts the US wave).
+R_M1_LO = -0.6  # clamp the anchor to the validated range: observed r_m1 runs
+R_M1_HI = 0.8   # -0.47..+0.58 across the library and practice cases; past it
+# the slope is extrapolation, not evidence (same logic as the ln(v1) cap).
+# Without the clamp, an inconsistent history (or a corrupted hour) could
+# feed r_m1 = -3.9 and predict a collapsing day for the biggest launch ever.
 
 
 def round2(x):
@@ -138,6 +178,78 @@ def day_hours(comp):
     return hrs
 
 
+def viewers_hours_before(hourly_pts, day_start, hours_before):
+    """Viewers in the hour starting `hours_before` hours before day_start.
+
+    `hourly_pts` are whole-hour points with a `from` timestamp (history_hourly
+    for a target case, `hourly` for a comparable). Returns None when that
+    hour has no usable point. Bucketed by whole hours, as the data is
+    hourly-aligned.
+    """
+    try:
+        day = datetime.fromisoformat(day_start.replace("Z", "+00:00"))
+    except (KeyError, ValueError, TypeError):
+        return None
+    for pt in hourly_pts or []:
+        try:
+            t = datetime.fromisoformat(pt["from"].replace("Z", "+00:00"))
+            v = pt.get("viewers")
+        except (KeyError, ValueError, TypeError):
+            continue
+        if v is None or v <= 0:
+            continue
+        if int((t - day).total_seconds() // 3600) == -hours_before:
+            return float(v)
+    return None
+
+
+def viewers_from_minute_history(history, day_start, hours_before):
+    """Fallback: mean viewers over the minute reads in the hour starting
+    `hours_before` hours before day_start. `history` points carry `at`."""
+    try:
+        day = datetime.fromisoformat(day_start.replace("Z", "+00:00"))
+    except (KeyError, ValueError, TypeError):
+        return None
+    lo = day - timedelta(hours=hours_before)
+    hi = day - timedelta(hours=hours_before - 1)
+    vals = []
+    for pt in history or []:
+        try:
+            t = datetime.fromisoformat(pt["at"].replace("Z", "+00:00"))
+            v = pt.get("viewers")
+        except (KeyError, ValueError, TypeError):
+            continue
+        if v is None or v <= 0:
+            continue
+        if lo <= t < hi:
+            vals.append(float(v))
+    return sum(vals) / len(vals) if vals else None
+
+
+def r_m1_case(case, v1):
+    """Pre-launch anchor for a target case: ln(viewers in the hour before
+    day_start / hour-1 print). None when that hour is not recorded — the
+    caller then falls back to the pure hour-1 design, never a 0 substitute."""
+    if v1 <= 0:
+        return None
+    v = viewers_hours_before(case.get("history_hourly"), case.get("day_start"), 1)
+    if v is None:
+        v = viewers_from_minute_history(case.get("history"), case.get("day_start"), 1)
+    if v is None or v <= 0:
+        return None
+    return min(max(math.log(v / v1), R_M1_LO), R_M1_HI)
+
+
+def r_m1_comp(comp, v1):
+    """Pre-launch anchor for a comparable, from its own pre-day hourly data."""
+    if v1 <= 0:
+        return None
+    v = viewers_hours_before(comp.get("hourly"), comp.get("day_start"), 1)
+    if v is None or v <= 0:
+        return None
+    return min(max(math.log(v / v1), R_M1_LO), R_M1_HI)
+
+
 def is_console_only(platforms):
     p = (platforms or "").lower()
     if "pc" in p:
@@ -165,7 +277,7 @@ def classify(comp):
 
 
 def build_rows(case):
-    """Training rows: (ln v1, {hour: ln ratio}, weight) per usable comparable."""
+    """Training rows: (ln v1, {hour: ln ratio}, weight, r_m1) per usable comparable."""
     rows = []
     target_name = (case.get("game") or {}).get("name", "").lower()
     for comp in sorted(case.get("comparables") or [], key=lambda c: c.get("name", "")):
@@ -192,19 +304,52 @@ def build_rows(case):
             "ln_v1": math.log(v1),
             "log_ratio": {h: math.log(hrs[h] / v1) for h in hrs if h >= 2},
             "weight": w,
+            "r_m1": r_m1_comp(comp, v1),
         })
     return rows
 
 
-def wols(pts):
-    """Weighted OLS y ~ a + b*x. pts: (x, y, w). Returns (a, b, mx, sxx, sw)."""
-    sw = sum(p[2] for p in pts)
-    mx = sum(p[2] * p[0] for p in pts) / sw
-    my = sum(p[2] * p[1] for p in pts) / sw
-    sxx = sum(p[2] * (p[0] - mx) ** 2 for p in pts)
-    sxy = sum(p[2] * (p[0] - mx) * (p[1] - my) for p in pts)
-    b = sxy / sxx if sxx > 0 else 0.0
-    return my - b * mx, b, mx, sxx, sw
+def wls_multi(pts, xdim):
+    """Weighted least squares with intercept + xdim predictors.
+
+    pts: list of (x_tuple, y, w). Returns (beta, Ainv) where Ainv is the
+    inverse of the weighted normal-equation matrix, used for the leverage
+    term of the prediction interval. None when the system is singular.
+    """
+    k = xdim + 1
+    A = [[0.0] * k for _ in range(k)]
+    b = [0.0] * k
+    for x, y, w in pts:
+        xv = [1.0] + list(x)
+        for i in range(k):
+            b[i] += w * xv[i] * y
+            for j in range(k):
+                A[i][j] += w * xv[i] * xv[j]
+    M = [row[:] + [b[i]] for i, row in enumerate(A)]
+    for i in range(k):
+        piv = max(range(i, k), key=lambda r: abs(M[r][i]))
+        if abs(M[piv][i]) < 1e-12:
+            return None
+        M[i], M[piv] = M[piv], M[i]
+        for r in range(i + 1, k):
+            f = M[r][i] / M[i][i]
+            for c in range(i, k + 1):
+                M[r][c] -= f * M[i][c]
+    beta = [0.0] * k
+    for i in range(k - 1, -1, -1):
+        beta[i] = (M[i][k] - sum(M[i][j] * beta[j] for j in range(i + 1, k))) / M[i][i]
+    N = [row[:] + [1.0 if j == i else 0.0 for j in range(k)] for i, row in enumerate(A)]
+    for i in range(k):
+        piv = max(range(i, k), key=lambda r: abs(N[r][i]))
+        N[i], N[piv] = N[piv], N[i]
+        pv = N[i][i]
+        N[i] = [v / pv for v in N[i]]
+        for r in range(k):
+            if r != i and abs(N[r][i]) > 0:
+                f = N[r][i]
+                N[r] = [a - f * bv for a, bv in zip(N[r], N[i])]
+    Ainv = [row[k:] for row in N]
+    return beta, Ainv
 
 
 def smooth(vals, win=SMOOTH_WIN):
@@ -235,22 +380,49 @@ def forecast_case(case):
         return {"hours": [{"hour": h, "q": baseline_quantiles(p1, h)}
                           for h in range(2, 25)]}
 
+    # Iteration 4: the pre-launch anchor. When it is available it enters the
+    # design from the US East unlock (h6) on; before that, and whenever it is
+    # missing, the pure hour-1 design (v3) is used.
+    rm1 = r_m1_case(case, p1)
+
     med, spr = {}, {}
     for h in range(2, 25):
-        pts = [(r["ln_v1"], r["log_ratio"][h], r["weight"])
-               for r in rows if h in r["log_ratio"]]
+        use_feat = rm1 is not None and h >= MIN_HOUR_RM1
+        pts = []
+        for r in rows:
+            if h not in r["log_ratio"]:
+                continue
+            if use_feat and r["r_m1"] is None:
+                continue
+            xs = [r["ln_v1"]] + ([r["r_m1"]] if use_feat else [])
+            pts.append((tuple(xs), r["log_ratio"][h], r["weight"]))
         if len(pts) < MIN_POINTS:
+            # Too few rows with the anchor: fall back to the hour-1 design.
+            if use_feat:
+                pts = [( (r["ln_v1"],), r["log_ratio"][h], r["weight"])
+                       for r in rows if h in r["log_ratio"]]
+                use_feat = False
+            if len(pts) < MIN_POINTS:
+                med[h] = 0.0
+                spr[h] = 0.30
+                continue
+        out = wls_multi(pts, (2 if use_feat else 1))
+        if out is None:
             med[h] = 0.0
             spr[h] = 0.30
             continue
-        a, b, mx, sxx, _sw = wols(pts)
-        med[h] = a + b * lx_pred
-        res = [p[1] - (a + b * p[0]) for p in pts]
-        dof = max(1, len(pts) - 2)
+        beta, Ainv = out
+        xv = [1.0, lx_pred] + ([rm1] if use_feat else [])
+        med[h] = sum(bi * xi for bi, xi in zip(beta, xv))
+        res = [y - sum(bi * xi for bi, xi in zip(beta, [1.0] + list(x)))
+               for x, y, w in pts]
+        dof = max(1, len(pts) - (3 if use_feat else 2))
         s = math.sqrt(sum(r * r for r in res) / dof)
         # Prediction interval: wider when the target extrapolates from the
-        # training centre.
-        s *= math.sqrt(1 + 1.0 / len(pts) + (lx - mx) ** 2 / max(sxx, 1e-9))
+        # training centre (leverage term, via the normal-equation inverse).
+        lev = sum(xv[i] * sum(Ainv[i][j] * xv[j] for j in range(len(xv)))
+                for i in range(len(xv)))
+        s *= math.sqrt(1 + 1.0 / len(pts) + max(lev - 1.0 / len(pts), 0.0))
         spr[h] = max(0.05, s)
     # Iteration 3: the median is NOT smoothed. Smoothing blurs the sharp
     # features the truth actually has (the h5 US-midnight jump, the h12
