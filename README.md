@@ -28,12 +28,18 @@ Only launches shaped by a rolling midnight-local unlock like GTA VI's count;
 simultaneous global unlocks, early-access-contaminated launches, free-to-play
 and slow-burn launches, and the target game's own pre-release history are
 excluded. Weights favour console-only launches (GTA VI is console-only) and
-older launches (the 2018–2020 Sony/Rockstar console launches are the closest
-analogues for a Rockstar midnight rolling launch).
+older launches (2.0x per year back: the 2020 Sony console launches are the
+closest analogues for a Rockstar midnight rolling launch). The median is
+shifted up by an amount growing with the hour (the late-day surge, when the
+US wakes up, is systematically underpredicted by the shape library), and the
+regression is never evaluated past ln(viewers_1) = 12.6 — GTA VI's hour-1
+print will exceed every validated launch, and a linear slope extrapolated
+past the data would predict a declining day, which cannot happen for a
+rolling-midnight launch.
 
-Local validation on the four practice cases: mean pinball loss **0.180**
-(house baseline: 0.387). Deterministic, offline, runs in under a second per
-case.
+Local validation on the four practice cases: mean pinball loss **0.156**
+(house baseline: 0.387; v1 entry: 0.180). Deterministic, offline, runs in
+under a second per case.
 
 ## Run it
 
