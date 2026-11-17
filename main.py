@@ -133,6 +133,22 @@ day), this model overshoots more than v4 (flat 1M day at r_m1 = 0.70:
 0.290 vs v4's 0.145) — that is the bet being taken, and the cap is what
 bounds it.
 
+Iteration 6 (poker-mid branch, NOT the main submission): the optimal point
+on the ship<->full frontier for winning ONE final day. The boost threshold
+is lowered (0.3 -> 0.175) and the boost raised (2.0 -> 2.5), so the bet
+fires on warm anchors too, not only Wolverine-hot ones. Validated:
+practice 0.1363 (vs ship 0.1343), LOPO-rest 3/4, final-day poker score
+0.1706 (vs ship 0.1826, full 0.1588), explosive scenarios S1 0.439 / S6
+0.386 / super-Wolverine 0.214 (vs ship 0.477 / 0.398 / 0.236), failure
+modes S9 0.298 / S10 0.264 (vs ship 0.290 / 0.257 — essentially tied).
+It does NOT replace the ship under the ship rule (practice is slightly
+worse); it is chambered for the parent to choose if the quota opens wide
+and the rank-1 bet is wanted. An hour-ramped boost was tested and
+REJECTED: it improves practice (0.1318) but worsens the final-day poker
+score (0.1868) — the ramp helps small-v1 practice cases (Wolverine's
+actual v1 is only 23k) but hurts the capped-v1 regime the final day
+lives in, where the boost is needed early.
+
 Standard library only. Deterministic: inputs are processed in sorted order,
 no randomness, no network, no clock. Runs in well under a second per case.
 """
@@ -180,9 +196,9 @@ R_M1_HI = 0.8   # -0.47..+0.58 across the library and practice cases; past it
 # Without the clamp, an inconsistent history (or a corrupted hour) could
 # feed r_m1 = -3.9 and predict a collapsing day for the biggest launch ever.
 RM1_BETA_SCALE = 1.375  # Iteration 5: base scale on the fitted r_m1
-RM1_BOOST = 2.0         # coefficient — the linear fit understates how much
-RM1_BOOST_THRESHOLD = 0.3  # a hot pre-launch ramp predicts; the boost only
-# fires above r_m1 = 0.3 (Wolverine-hot), so cool anchors are barely touched.
+RM1_BOOST = 2.5         # coefficient — the linear fit understates how much
+RM1_BOOST_THRESHOLD = 0.175  # a hot pre-launch ramp predicts; the boost only
+# fires above r_m1 = 0.175, so cool anchors are barely touched.
 BOOST_CAP = 0.20  # the boost may move any hour's median by at most 0.20 log
 # units: the bet stays bounded even if the final anchor lands far outside
 # the observed range (max r_m1 = 0.58). Without the cap the boost would push
