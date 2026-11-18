@@ -133,6 +133,45 @@ day), this model overshoots more than v4 (flat 1M day at r_m1 = 0.70:
 0.290 vs v4's 0.145) — that is the bet being taken, and the cap is what
 bounds it.
 
+Iteration 7 (practice loss 0.1343 -> 0.1304; final-day poker score 0.1826
+-> 0.1757; leave-one-practice-out rest-means beat v4 on 3/4 subsets;
+leave-one-comparable-out 0.2177 vs the ship's 0.2165): quantile
+CALIBRATION plus a flatter vintage weight, not more level betting. The
+parent's calibration check on v5-ship (92 hour-points) showed the loss
+lives in the median level (q50 pinball 0.2117, worst by far; coverage
+[q05,q95] 0.97 vs the ideal 0.90, [q25,q75] 0.57 vs 0.50 — intervals
+slightly too wide), and the anchor's level error is case-dependent (RDR2
+under-predicted, Spider-Man 2 over-predicted ~20% in log), so no global
+median shift can fix it. What the calibration does fix: (1) a global
+spread scale of 0.9 — the intervals are too wide, and narrowing them
+improves practice on 3 of 4 cases at a small cost to the explosive
+scenarios; (2) an anchor-conditional upper-tail boost (+1.0 per unit of
+r_m1 above 0.3) — pinball is asymmetric (overpredicting q95 costs
+0.05/unit on a flat day, underpredicting it costs 0.95/unit on an
+explosive day), so the rank-1 bet belongs in the upper tail, and because
+it fires only on hot anchors the cool-anchor practice cases are
+untouched; (3) a flatter vintage weight (2.0, not 2.5) — with the anchor
+in the model the optimum moved, and 2.0 beats 2.5 on practice AND poker
+at every console weight. The combination is the first candidate to pass
+all three ship-rule legs at once (practice < 0.1343, LOPO-rest >= 3/4,
+poker <= 0.1826), with margin on both scores. The plateau is broad:
+every point of spread_scale 0.88-0.92 x upper_boost 0.75-1.25 passes, and
+every vintage weight 1.75-2.1 passes, so the round centre (0.9, 1.0, 2.0)
+is shipped, not a knife-edge. Honest costs: the narrower spread worsens
+leave-one-comparable-out slightly (0.2177 vs 0.2165 — same direction as
+ship-vs-v4 and full-vs-ship, both accepted), and the hot-anchor failure
+modes worsen (flat 1M day at r_m1 = 0.70: 0.333 vs the ship's 0.290) —
+still well inside the full-poker branch's 0.382. Ensembles of the
+existing candidates were tried and rejected — they interpolate the
+ship<->full frontier (ship+v4 even improves practice to 0.1336) but halve
+the anchor bet and wreck the poker score (0.2009). Narrowing only the
+inner quantiles was tried and rejected — half the practice gain comes
+from the outer quantiles, and the inner-only variant does not dominate.
+Pre-launch baseline / channels features were NOT chased: on 29-37
+comparables the peak correlates at most 0.34 with any pre-launch
+quantity — the launch is a regime break and the level is fundamentally
+uncertain from hour-1 data; the edge is shape + quantile calibration.
+
 Standard library only. Deterministic: inputs are processed in sorted order,
 no randomness, no network, no clock. Runs in well under a second per case.
 """
@@ -160,7 +199,15 @@ LX_CAP = 12.6  # do not extrapolate the ln(v1) slope past the biggest validated 
 SIGMA_BASE = 0.15  # fallback spread / house-baseline spread
 PEAK_MAX = 4.0     # exclude launches whose peak exceeds 4x their hour-1 print
 MIN_POINTS = 5     # minimum training launches for a per-hour regression
-TIME_WEIGHT = 2.5  # per-year vintage weight, favouring older launches
+TIME_WEIGHT = 2.0  # per-year vintage weight, favouring older launches.
+# Iteration 7: 2.0, not 2.5. With the anchor in the model the optimum
+# moved flatter: 2.0 beats 2.5 on practice AND poker at every console
+# weight (ship knobs: 0.1316/0.1779 vs 0.1343/0.1826), 3.0 loses
+# everywhere, and 1.0 collapses practice (0.148). The optimum is a broad
+# plateau (1.75-2.1 all pass with practice 0.1298-0.1311, poker
+# 0.1757-0.1763, LOO-C 0.2177-0.2181), so 2.0 is the round centre, not a
+# knife-edge. LOO-C independently agrees the region is good (2.0/cw=8:
+# 0.2177, and 1.5/cw=8 even beats the ship's 0.2165).
 CONSOLE_WEIGHT = 8.0
 SMOOTH_WIN = 1     # smoothing window over neighbouring hours
 SPREAD_SHRINK = 0.85  # fraction each hour's spread moves toward the median
@@ -171,6 +218,27 @@ SPREAD_SHRINK = 0.85  # fraction each hour's spread moves toward the median
 # p03 0.187 -> 0.186, p01/p02 essentially unchanged); stronger shrinkage
 # keeps helping up to a fully flat spread, but that discards the real
 # widening of uncertainty over the day, so 85% is the stopping point.
+SPREAD_SCALE = 0.9  # Iteration 7: global spread calibration. The intervals
+# are too wide: the truth sits inside the band more often than the nominal
+# coverage implies, so narrowing every hour's spread by 10% improves the
+# practice pinball loss on 3 of 4 cases (0.1343 -> 0.1324 at spread 0.9
+# alone) and leaves LOPO-rest at 3/4. It costs the explosive scenarios
+# (the narrower q95 is exceeded more often when the truth runs away),
+# which is why it is paired with the hot-anchor upper-tail boost below.
+UPPER_BOOST = 1.0  # Iteration 7: anchor-conditional upper-tail boost.
+UPPER_BOOST_THRESHOLD = 0.3  # When the pre-launch anchor is hot
+# (r_m1 above 0.3, Wolverine-hot), the upper quantiles are widened by
+# UPPER_BOOST per unit of excess anchor. Pinball is asymmetric: over-
+# predicting q95 costs 0.05/unit on a flat day but underpredicting it
+# costs 0.95/unit on an explosive day — the rank-1 bet belongs in the
+# upper tail, not (only) in the median. Unlike a global upper=1.1 (which
+# costs practice), this fires only on hot anchors, so the cool-anchor
+# practice cases (RDR2 0.28, GoW 0.19, SM2 0.14) are untouched. Combined
+# with SPREAD_SCALE 0.9 it beats v5-ship on practice (0.1304) AND on the
+# final-day poker score (0.1757 vs 0.1826) with LOPO-rest 3/4 — the first
+# candidate to pass all three ship-rule legs at once. (The 0.9/1.0 combo
+# alone scores 0.1334/0.1800; the vintage weight 2.0 below carries it to
+# 0.1304/0.1757.)
 MIN_HOUR_RM1 = 6  # first hour the pre-launch anchor r_m1 enters the design
 # (the US East unlock, 05:00 UTC: before it the trough hours are driven by
 # APAC/UK decay and the feature adds noise; from h6 it predicts the US wave).
@@ -495,6 +563,8 @@ def forecast_case(case):
     median_spr = sorted(spr.values())[len(spr) // 2]
     spr = {h: (1.0 - SPREAD_SHRINK) * s + SPREAD_SHRINK * median_spr
            for h, s in spr.items()}
+    # Iteration 7: global spread calibration (see SPREAD_SCALE).
+    spr = {h: SPREAD_SCALE * s for h, s in spr.items()}
 
     hours = []
     for h in range(2, 25):
@@ -502,8 +572,12 @@ def forecast_case(case):
         # up) is systematically underpredicted by the shape library.
         shift = MED_SHIFT_GROW * (h - 1) / 23.0
         qs = []
+        # Iteration 7: anchor-conditional upper-tail boost (see UPPER_BOOST).
+        upper = UPPER_SCALE
+        if rm1 is not None:
+            upper += UPPER_BOOST * max(0.0, rm1 - UPPER_BOOST_THRESHOLD)
         for z in Z:
-            scale = UPPER_SCALE if z > 0 else (LOWER_SCALE if z < 0 else 1.0)
+            scale = upper if z > 0 else (LOWER_SCALE if z < 0 else 1.0)
             qs.append(p1 * math.exp(med[h] + shift + spr[h] * scale * z))
         # Enforce non-decreasing, finite, within (0, 1e9].
         qs = [min(max(q, 1e-6), 1e9) for q in qs]
