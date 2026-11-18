@@ -59,16 +59,30 @@ anchor lies (hot ramp, flat day), this model overshoots more than v4 — that is
 the bet being taken, and the cap is what bounds it. A fuller poker (base 1.5,
 boost 4, shift 0.175, upper 1.1, cap 0.25) lives on the `poker` branch.
 
-Local validation on the four practice cases: mean pinball loss **0.134**
-(house baseline: 0.387; v4: 0.137; v3 entry: 0.143; v2 entry: 0.156; v1 entry:
-0.180). Leave-one-comparable-out: 0.217 (v4: 0.209 — the anchor scaling costs
-a little on the comparables, whose anchors are mostly cool; the trade is for
-the final day, where the anchor is the only real-time explosiveness signal).
-Leave-one-practice-out rest-means beat v4 on 3 of 4 subsets. Final-day
-scenarios (synthetic days built from practice shapes): an explosive 400k day
-0.212 (v4: 0.332), a strong 400k day 0.215 (v4: 0.232), a flat 1M day 0.103
-(v4: 0.102), a crater 1M day 0.155 (v4: 0.158). Deterministic, offline, runs
-in under a second per case.
+Iteration 7 — quantile calibration plus a flatter vintage weight: the
+intervals are slightly too wide (coverage [q05,q95] 0.97 vs the ideal
+0.90), so every hour's spread is narrowed by 10% (spread scale 0.9);
+when the pre-launch anchor is hot (r_m1 above 0.3) the upper quantiles
+are widened by +1.0 per unit of excess anchor — pinball is asymmetric
+(overpredicting q95 costs 0.05/unit on a flat day, underpredicting it
+costs 0.95/unit on an explosive day), so the rank-1 bet belongs in the
+upper tail, and it fires only on hot anchors so the cool-anchor practice
+cases are untouched. The vintage weight is flattened to 2.0 per year
+(was 2.5): with the anchor in the model the optimum moved, and 2.0 beats
+2.5 on practice and on the final-day scenarios at every console weight.
+The honest costs: leave-one-comparable-out is slightly worse (0.218 vs
+0.217) and a flat day after a hot ramp costs more (0.333 vs 0.290) — both
+well inside the full-poker branch's numbers.
+
+Local validation on the four practice cases: mean pinball loss **0.130**
+(house baseline: 0.387; v5-ship: 0.134; v4: 0.137; v3 entry: 0.143; v2
+entry: 0.156; v1 entry: 0.180). Leave-one-comparable-out: 0.218 (v5-ship:
+0.217; v4: 0.209). Leave-one-practice-out rest-means beat v4 on 3 of 4
+subsets. Final-day scenarios (synthetic days built from practice shapes):
+an explosive 400k day 0.192 (v5-ship: 0.212; v4: 0.332), a strong 400k
+day 0.216 (v5-ship: 0.215; v4: 0.232), a flat 1M day 0.101 (v5-ship:
+0.103; v4: 0.102), a crater 1M day 0.155 (v5-ship: 0.155; v4: 0.158).
+Deterministic, offline, runs in under a second per case.
 
 ## Run it
 
